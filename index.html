@@ -71,8 +71,30 @@
   .brand-tile::before{
     content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background: var(--accent);
   }
-  .brand-tile .bname{ font-size:15px; font-weight:800; margin-bottom:2px; }
+  .brand-tile .bname{ font-size:15px; font-weight:800; margin-bottom:2px; display:flex; align-items:center; gap:6px; }
   .brand-tile .btag{ font-size:11px; color:var(--text-dim); line-height:1.4; margin-bottom:12px; min-height:30px; }
+  .brand-edit-toggle{
+    font-size:11px; color:var(--text-faint); cursor:pointer; padding:2px 5px; border-radius:5px;
+    opacity:0; transition: opacity .12s, color .12s; margin-left:auto;
+  }
+  .brand-tile:hover .brand-edit-toggle{ opacity:1; }
+  .brand-edit-toggle:hover{ color:var(--accent); background: rgba(0,0,0,0.04); }
+  .brand-edit-form{
+    display:flex; flex-direction:column; gap:7px; background:var(--surface-2); border:1px solid var(--line);
+    border-radius:10px; padding:10px; margin-bottom:10px; cursor:default;
+  }
+  .brand-edit-form input{
+    background:var(--surface); border:1px solid var(--line); color:var(--text); border-radius:8px;
+    padding:7px 9px; font-size:12px; font-family:inherit; outline:none; width:100%;
+  }
+  .brand-edit-form input:focus{ border-color:var(--accent); }
+  .be-kpi-row{ display:flex; gap:6px; }
+  .be-kpi-item{ flex:1; display:flex; flex-direction:column; gap:3px; }
+  .be-kpi-item label{ font-size:9.5px; color:var(--text-faint); }
+  .be-cancel, .be-submit{ font-size:11.5px; cursor:pointer; padding:3px 6px; }
+  .be-cancel{ color:var(--text-faint); }
+  .be-cancel:hover{ color:var(--text); }
+  .be-submit{ color:var(--accent); font-weight:700; }
 
   .flap-row{ display:flex; align-items:flex-end; gap:6px; height:52px; margin-bottom:6px; }
   .flap{ flex:1; border-radius:4px 4px 2px 2px; background: var(--surface-2); position:relative; min-height:4px; }
@@ -167,6 +189,28 @@
   .task-row:hover .del-btn{ opacity:1; }
   .del-btn:hover{ color:var(--red); background: rgba(232,96,93,0.1); }
 
+  .edit-btn{
+    font-size:13px; line-height:1; color:var(--text-faint); cursor:pointer; padding:4px 6px;
+    border-radius:6px; flex-shrink:0; opacity:0; transition: opacity .12s, color .12s;
+  }
+  .task-row:hover .edit-btn{ opacity:1; }
+  .edit-btn:hover{ color:var(--common); background: rgba(46,111,176,0.1); }
+
+  .task-row.editing{ padding:0; }
+  .edit-form{
+    display:flex; flex-direction:column; gap:7px; background:var(--surface); border:1px solid var(--accent, var(--line));
+    border-radius:10px; padding:12px; margin:4px 0; width:100%; box-shadow: 0 1px 3px rgba(16,24,40,0.06);
+  }
+  .edit-form input{
+    background:var(--surface-2); border:1px solid var(--line); color:var(--text); border-radius:8px;
+    padding:8px 10px; font-size:12.5px; font-family:inherit; outline:none;
+  }
+  .edit-form input:focus{ border-color:var(--common); }
+  .ef-cancel, .ef-submit{ font-size:12px; cursor:pointer; padding:4px 6px; }
+  .ef-cancel{ color:var(--text-faint); }
+  .ef-cancel:hover{ color:var(--text); }
+  .ef-submit{ color:var(--common); font-weight:700; }
+
   .empty-note{ font-size:12px; color:var(--text-faint); padding:20px 10px; text-align:center; }
 
   @media (max-width:520px){
@@ -207,7 +251,7 @@
 (function(){
   const TODAY = new Date('2026-07-02T00:00:00');
 
-  const BRANDS = {
+  const DEFAULT_BRANDS = {
     meolli: { name:'멀리', accent:'var(--meolli)', hex:'#E8A23D',
       tagline:'전환율 증가 · 반품율 감소 · 신제품 경쟁력 강화',
       kpi: { type:'percent', unit:'%',
@@ -232,6 +276,8 @@
       julyMilestone: { label:'물류·발주·상세페이지 기반 정리', due:'2026-07-31' }
     }
   };
+
+  let BRANDS = JSON.parse(JSON.stringify(DEFAULT_BRANDS));
 
   const DEFAULT_TASKS = [
     { id:'m1', brand:'meolli', owner:['준목','지윤'], title:'상세페이지 개선 (MW8·MWX·쿨매트)', detail:'주요 제품 3개 상세페이지 리뉴얼', due:'2026-07-31' },
@@ -264,9 +310,12 @@
   let state = {}; // taskId -> boolean
   let activePerson = 'all';
   let activeBrand = 'all';
+  let editingId = null;
+  let editingBrand = null;
 
   const STORAGE_KEY = 'wig-tasks-state';
   const TASKS_KEY = 'wig-tasks-list';
+  const BRANDS_KEY = 'wig-brands-data';
   const POLL_MS = 6000;
 
   // ---------------------------------------------------------------
@@ -303,7 +352,8 @@
       const db = getDatabase(app);
       const stateRef = ref(db, 'wig/state');
       const tasksRef = ref(db, 'wig/tasks');
-      fb = { set, stateRef, tasksRef };
+      const brandsRef = ref(db, 'wig/brands');
+      fb = { set, stateRef, tasksRef, brandsRef };
 
       onValue(tasksRef, (snap) => {
         const val = snap.val();
@@ -318,6 +368,17 @@
 
       onValue(stateRef, (snap) => {
         state = snap.val() || {};
+        render();
+        setSyncLabel('Firebase 실시간 연결됨 · ' + formatTime(new Date()));
+      });
+
+      onValue(brandsRef, (snap) => {
+        const val = snap.val();
+        if(val === null){
+          set(brandsRef, DEFAULT_BRANDS); // 최초 1회 기본값 시딩
+          return;
+        }
+        BRANDS = val;
         render();
         setSyncLabel('Firebase 실시간 연결됨 · ' + formatTime(new Date()));
       });
@@ -346,6 +407,14 @@
       try{ await fb.set(fb.tasksRef, tasksArrayToObj(TASKS)); }catch(e){ console.error('Firebase 저장 실패', e); }
     } else if(backend === 'claude'){
       await saveTasks();
+    }
+  }
+
+  async function persistBrands(){
+    if(backend === 'firebase'){
+      try{ await fb.set(fb.brandsRef, BRANDS); }catch(e){ console.error('Firebase 저장 실패', e); }
+    } else if(backend === 'claude'){
+      await saveBrands();
     }
   }
 
@@ -436,6 +505,42 @@
     }catch(e){ console.error('항목 저장 실패', e); }
   }
 
+  let lastRemoteBrands = null;
+
+  async function loadBrands(isPoll){
+    if(typeof window.storage === 'undefined') return;
+    let raw = null;
+    try{
+      const r = await window.storage.get(BRANDS_KEY, true);
+      if(r && typeof r.value === 'string') raw = r.value;
+    }catch(e){
+      raw = null;
+    }
+    if(raw === null){
+      if(!isPoll){
+        raw = JSON.stringify(DEFAULT_BRANDS);
+        try{ await window.storage.set(BRANDS_KEY, raw, true); }catch(e){ /* will retry on next save */ }
+      } else {
+        return;
+      }
+    }
+    const changed = raw !== lastRemoteBrands;
+    lastRemoteBrands = raw;
+    if(changed){
+      try{ BRANDS = JSON.parse(raw); }catch(parseErr){ /* keep current BRANDS */ }
+      render();
+    }
+  }
+
+  async function saveBrands(){
+    try{
+      const raw = JSON.stringify(BRANDS);
+      await window.storage.set(BRANDS_KEY, raw, true);
+      lastRemoteBrands = raw;
+      setSyncLabel('팀 전체 공유 보드 · 마지막 동기화 ' + formatTime(new Date()));
+    }catch(e){ console.error('브랜드 지표 저장 실패', e); }
+  }
+
   function addTask(brand, data){
     const id = 'custom-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
     TASKS.push({
@@ -449,6 +554,18 @@
     render();
   }
 
+  function updateTask(id, data){
+    const t = TASKS.find(x => x.id === id);
+    if(!t) return;
+    t.title = data.title;
+    t.owner = data.owner;
+    t.due = data.due;
+    t.detail = data.detail;
+    editingId = null;
+    persistTasks();
+    render();
+  }
+
   function deleteTask(id){
     TASKS = TASKS.filter(t => t.id !== id);
     delete state[id];
@@ -458,9 +575,9 @@
   }
 
   function startPolling(){
-    setInterval(() => { loadState(true); loadTasks(true); }, POLL_MS);
+    setInterval(() => { loadState(true); loadTasks(true); loadBrands(true); }, POLL_MS);
     document.addEventListener('visibilitychange', () => {
-      if(document.visibilityState === 'visible'){ loadState(true); loadTasks(true); }
+      if(document.visibilityState === 'visible'){ loadState(true); loadTasks(true); loadBrands(true); }
     });
   }
 
@@ -517,7 +634,6 @@
     let html = '';
     Object.entries(BRANDS).forEach(([key, b]) => {
       const stats = brandStats(key);
-      const isJulyKpi = b.julyKpi || b.julyMilestone;
       let middle = '';
       if(b.kpi){
         middle = flapChart(b.kpi);
@@ -527,11 +643,39 @@
           <div class="m-due">~ ${b.milestone.due.slice(5).replace('-','/')}</div>
         </div>`;
       }
+
+      let editForm = '';
+      if(editingBrand === key){
+        const taglineVal = (b.tagline||'').replace(/"/g,'&quot;');
+        let midInputs = '';
+        if(b.kpi){
+          midInputs = `<div class="be-kpi-row">${b.kpi.bars.map((bar,i)=>`
+            <div class="be-kpi-item">
+              <label>${bar.label}</label>
+              <input type="number" step="0.01" class="be-kpi-val" data-idx="${i}" value="${bar.value}" />
+            </div>`).join('')}</div>`;
+        } else if(b.milestone){
+          midInputs = `
+            <input type="text" class="be-mlabel" placeholder="마일스톤 목표" value="${(b.milestone.label||'').replace(/"/g,'&quot;')}" />
+            <input type="date" class="be-mdue" value="${b.milestone.due||''}" />`;
+        }
+        editForm = `
+        <div class="brand-edit-form" id="brandedit-${key}">
+          <input type="text" class="be-tagline" placeholder="한줄 설명" value="${taglineVal}" />
+          ${midInputs}
+          <div class="af-actions">
+            <span class="be-cancel" data-cancelbrand="${key}">취소</span>
+            <span class="be-submit" data-submitbrand="${key}">저장</span>
+          </div>
+        </div>`;
+      }
+
       html += `
         <div class="brand-tile ${activeBrand===key?'active':''}" data-brand="${key}" style="--accent:${b.hex}">
-          <div class="bname">${b.name}</div>
+          <div class="bname">${b.name}<span class="brand-edit-toggle" data-editbrand="${key}" title="후행지표 수정">✎</span></div>
           <div class="btag">${b.tagline}</div>
           ${middle}
+          ${editForm}
           <div class="brand-progress">
             <div class="bp-top"><span>실행률</span><span class="num">${stats.done}/${stats.total} · ${stats.pct}%</span></div>
             <div class="bp-bar"><div class="bp-fill" style="width:${stats.pct}%"></div></div>
@@ -543,6 +687,45 @@
       el.addEventListener('click', () => {
         const key = el.dataset.brand;
         activeBrand = (activeBrand === key) ? 'all' : key;
+        render();
+      });
+    });
+    grid.querySelectorAll('.brand-edit-toggle').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const key = el.dataset.editbrand;
+        editingBrand = (editingBrand === key) ? null : key;
+        render();
+      });
+    });
+    grid.querySelectorAll('.brand-edit-form').forEach(el => {
+      el.addEventListener('click', (e) => e.stopPropagation());
+    });
+    grid.querySelectorAll('.be-cancel').forEach(el => {
+      el.addEventListener('click', (e) => { e.stopPropagation(); editingBrand = null; render(); });
+    });
+    grid.querySelectorAll('.be-submit').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const key = el.dataset.submitbrand;
+        const form = document.getElementById('brandedit-' + key);
+        const b = BRANDS[key];
+        b.tagline = form.querySelector('.be-tagline').value.trim();
+        if(b.kpi){
+          form.querySelectorAll('.be-kpi-val').forEach(inp => {
+            const idx = parseInt(inp.dataset.idx, 10);
+            const val = parseFloat(inp.value);
+            if(!isNaN(val)) b.kpi.bars[idx].value = val;
+          });
+        }
+        if(b.milestone){
+          const label = form.querySelector('.be-mlabel').value.trim();
+          const due = form.querySelector('.be-mdue').value;
+          if(label) b.milestone.label = label;
+          if(due) b.milestone.due = due;
+        }
+        editingBrand = null;
+        persistBrands();
         render();
       });
     });
@@ -603,6 +786,24 @@
       ts.forEach(t => {
         const done = !!state[t.id];
         const di = dueInfo(t.due);
+
+        if(editingId === t.id){
+          html += `
+        <div class="task-row editing">
+          <div class="edit-form" id="editform-${t.id}">
+            <input type="text" class="ef-title" placeholder="목표 제목" value="${(t.title||'').replace(/"/g,'&quot;')}" />
+            <input type="text" class="ef-owner" placeholder="담당자 (쉼표로 구분)" value="${t.owner.join(',')}" />
+            <input type="date" class="ef-due" value="${t.due || ''}" />
+            <input type="text" class="ef-detail" placeholder="비고 (선택)" value="${(t.detail||'').replace(/"/g,'&quot;')}" />
+            <div class="af-actions">
+              <span class="ef-cancel" data-cancelid="${t.id}">취소</span>
+              <span class="ef-submit" data-submitid="${t.id}">저장</span>
+            </div>
+          </div>
+        </div>`;
+          return;
+        }
+
         html += `
         <div class="task-row ${done?'done':''}">
           <div class="chk ${done?'checked':''}" data-id="${t.id}">
@@ -617,6 +818,7 @@
               ${t.recurring ? '<span class="chip recurring">매주</span>' : ''}
             </div>
           </div>
+          <span class="edit-btn" data-editid="${t.id}" title="항목 수정">✎</span>
           <span class="del-btn" data-delid="${t.id}" title="항목 삭제">×</span>
         </div>`;
       });
@@ -634,6 +836,27 @@
       el.addEventListener('click', () => {
         const t = TASKS.find(x => x.id === el.dataset.delid);
         if(t && confirm(`"${t.title}" 항목을 삭제할까요?`)) deleteTask(el.dataset.delid);
+      });
+    });
+    container.querySelectorAll('.edit-btn').forEach(el => {
+      el.addEventListener('click', () => {
+        editingId = el.dataset.editid;
+        render();
+      });
+    });
+    container.querySelectorAll('.ef-cancel').forEach(el => {
+      el.addEventListener('click', () => { editingId = null; render(); });
+    });
+    container.querySelectorAll('.ef-submit').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = el.dataset.submitid;
+        const form = document.getElementById('editform-' + id);
+        const title = form.querySelector('.ef-title').value.trim();
+        if(!title){ form.querySelector('.ef-title').focus(); return; }
+        const owner = form.querySelector('.ef-owner').value.split(',').map(s=>s.trim()).filter(Boolean);
+        const due = form.querySelector('.ef-due').value || null;
+        const detail = form.querySelector('.ef-detail').value.trim();
+        updateTask(id, { title, owner: owner.length ? owner : ['미배정'], due, detail: detail || undefined });
       });
     });
     container.querySelectorAll('.add-btn').forEach(el => {
@@ -684,6 +907,7 @@
     if(typeof window.storage !== 'undefined'){
       backend = 'claude';
       await loadTasks(false);
+      await loadBrands(false);
       await loadState(false);
       startPolling();
     } else {
@@ -699,7 +923,7 @@
     const btn = document.getElementById('syncBtn');
     btn.classList.add('spinning');
     if(backend === 'claude'){
-      loadState(true).finally(() => setTimeout(() => btn.classList.remove('spinning'), 300));
+      Promise.all([loadState(true), loadTasks(true), loadBrands(true)]).finally(() => setTimeout(() => btn.classList.remove('spinning'), 300));
     } else {
       setTimeout(() => btn.classList.remove('spinning'), 300);
     }
