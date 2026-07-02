@@ -109,6 +109,11 @@
   .milestone-block .m-label{ font-size:11px; color:var(--text-dim); margin-bottom:3px; }
   .milestone-block .m-due{ font-size:10.5px; color:var(--text-faint); }
 
+  .july-block{ border-top:1px dashed var(--line); padding-top:10px; margin-bottom:10px; }
+  .july-label{ font-size:9.5px; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-faint); font-weight:700; margin-bottom:6px; }
+
+  .be-section-label{ font-size:10px; color:var(--text-faint); font-weight:700; margin-top:4px; }
+
   .brand-progress{ margin-top:8px; }
   .brand-progress .bp-top{ display:flex; justify-content:space-between; font-size:10.5px; color:var(--text-dim); margin-bottom:5px; }
   .bp-bar{ height:6px; border-radius:4px; background: var(--surface-2); overflow:hidden; }
@@ -644,6 +649,19 @@
         </div>`;
       }
 
+      let julyBlock = '';
+      if(b.julyKpi){
+        julyBlock = `<div class="july-block"><div class="july-label">7월 목표</div>${flapChart(b.julyKpi)}</div>`;
+      } else if(b.julyMilestone){
+        julyBlock = `<div class="july-block">
+          <div class="july-label">7월 목표</div>
+          <div class="milestone-block" style="margin-bottom:0">
+            <div class="m-label">🎯 ${b.julyMilestone.label}</div>
+            <div class="m-due">~ ${b.julyMilestone.due.slice(5).replace('-','/')}</div>
+          </div>
+        </div>`;
+      }
+
       let editForm = '';
       if(editingBrand === key){
         const taglineVal = (b.tagline||'').replace(/"/g,'&quot;');
@@ -659,10 +677,26 @@
             <input type="text" class="be-mlabel" placeholder="마일스톤 목표" value="${(b.milestone.label||'').replace(/"/g,'&quot;')}" />
             <input type="date" class="be-mdue" value="${b.milestone.due||''}" />`;
         }
+
+        let julyInputs = '';
+        if(b.julyKpi){
+          julyInputs = `<div class="be-kpi-row">${b.julyKpi.bars.map((bar,i)=>`
+            <div class="be-kpi-item">
+              <label>${bar.label}</label>
+              <input type="number" step="0.01" class="be-jkpi-val" data-idx="${i}" value="${bar.value}" />
+            </div>`).join('')}</div>`;
+        } else if(b.julyMilestone){
+          julyInputs = `
+            <input type="text" class="be-jmlabel" placeholder="7월 마일스톤 목표" value="${(b.julyMilestone.label||'').replace(/"/g,'&quot;')}" />
+            <input type="date" class="be-jmdue" value="${b.julyMilestone.due||''}" />`;
+        }
+
         editForm = `
         <div class="brand-edit-form" id="brandedit-${key}">
           <input type="text" class="be-tagline" placeholder="한줄 설명" value="${taglineVal}" />
+          <div class="be-section-label">3분기 목표</div>
           ${midInputs}
+          ${julyInputs ? `<div class="be-section-label">7월 목표</div>${julyInputs}` : ''}
           <div class="af-actions">
             <span class="be-cancel" data-cancelbrand="${key}">취소</span>
             <span class="be-submit" data-submitbrand="${key}">저장</span>
@@ -675,6 +709,7 @@
           <div class="bname">${b.name}<span class="brand-edit-toggle" data-editbrand="${key}" title="후행지표 수정">✎</span></div>
           <div class="btag">${b.tagline}</div>
           ${middle}
+          ${julyBlock}
           ${editForm}
           <div class="brand-progress">
             <div class="bp-top"><span>실행률</span><span class="num">${stats.done}/${stats.total} · ${stats.pct}%</span></div>
@@ -723,6 +758,19 @@
           const due = form.querySelector('.be-mdue').value;
           if(label) b.milestone.label = label;
           if(due) b.milestone.due = due;
+        }
+        if(b.julyKpi){
+          form.querySelectorAll('.be-jkpi-val').forEach(inp => {
+            const idx = parseInt(inp.dataset.idx, 10);
+            const val = parseFloat(inp.value);
+            if(!isNaN(val)) b.julyKpi.bars[idx].value = val;
+          });
+        }
+        if(b.julyMilestone){
+          const jlabel = form.querySelector('.be-jmlabel').value.trim();
+          const jdue = form.querySelector('.be-jmdue').value;
+          if(jlabel) b.julyMilestone.label = jlabel;
+          if(jdue) b.julyMilestone.due = jdue;
         }
         editingBrand = null;
         persistBrands();
